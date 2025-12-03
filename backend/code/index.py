@@ -1,0 +1,237 @@
+# -*- coding: utf-8 -*-
+"""
+阿里云函数计算入口文件
+简历分析 RESTful API 服务
+"""
+import json
+import base64
+import logging
+from urllib.parse import parse_qs
+
+from resume_parser import ResumeParser
+from info_extractor import InfoExtractor
+from matcher import ResumeMatcher
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 初始化组件
+resume_parser = ResumeParser()
+info_extractor = InfoExtractor()
+resume_matcher = ResumeMatcher()
+
+# 简单的内存缓存
+cache = {}
+
+
+def create_response(status_code, body, cors=True):
+    """创建 HTTP 响应"""
+    headers = {
+        "Content-Type": "application/json; charset=utf-8"
+    }
+    if cors:
+        headers.update({
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With"
+        })
+    
+    return {
+        "statusCode": status_code,
+        "headers": headers,
+        "body": json.dumps(body, ensure_ascii=False)
+    }
+
+
+def handle_upload(event):
+    """处理简历上传和解析"""
+    try:
+        # 获取请求体
+        body = event.get("body", "")
+        is_base64 = event.get("isBase64Encoded", False)
+        
+        if is_base64:
+            body = base64.b64decode(body)
+        
+        # 解析 multipart/form-data 或 JSON
+        content_type = event.get("headers", {}).get("content-type", "")
+        
+        if "multipart/form-data" in content_type:
+            # 解析 multipart 数据
+            pdf_data = parse_multipart(body, content_type)
+        elif "application/json" in content_type:
+            # JSON 格式，期望 base64 编码的 PDF
+            if isinstance(body, bytes):
+                body = body.decode("utf-8")
+            json_body = json.loads(body)
+            pdf_data = base64.b64decode(json_body.get("file", ""))
+        else:
+            return create_response(400, {"error": "不支持的内容类型"})
+        
+        if not pdf_data:
+            return create_response(400, {"error": "未找到 PDF 文件"})
+        
+        # 解析 PDF
+        logger.info("开始解析 PDF...")
+        parsed_result = resume_parser.parse(pdf_data)
+        
+        if not parsed_result["success"]:
+            return create_response(400, {"error": parsed_result["error"]})
+        
+        # 提取关键信息
+        logger.info("开始提取关键信息...")
+        extracted_info = info_extractor.extract(parsed_result["text"])
+        
+        # 生成缓存 key
+        import hashlib
+        cache_key = hashlib.md5(pdf_data).hexdigest()
+        
+        # 缓存结果
+        result = {
+            "cache_key": cache_key,
+            "raw_text": parsed_result["text"],
+            "pages": parsed_result["pages"],
+            "extracted_info": extracted_info,
+            "structured_text": parsed_result["structured_text"]
+        }
+        cache[cache_key] = result
+        
+        return create_response(200, {
+            "success": True,
+            "message": "简历解析成功",
+            "data": result
+        })
+        
+    except Exception as e:
+        logger.error(f"处理上传失败: {str(e)}")
+        return create_response(500, {"error": f"处理失败: {str(e)}"})
+
+
+def handle_match(event):
+    """处理简历与岗位匹配"""
+    try:
+        body = event.get("body", "")
+        is_base64 = event.get("isBase64Encoded", False)
+        
+        if is_base64:
+            body = base64.b64decode(body).decode("utf-8")
+        elif isinstance(body, bytes):
+            body = body.decode("utf-8")
+            
+        json_body = json.loads(body)
+        
+        # 获取参数
+        cache_key = json_body.get("cache_key", "")
+        job_description = json_body.get("job_description", "")
+        resume_text = json_body.get("resume_text", "")
+        extracted_info = json_body.get("extracted_info", {})
+        
+        if not job_description:
+            return create_response(400, {"error": "缺少岗位描述"})
+        
+        # 优先使用缓存的简历数据
+        if cache_key and cache_key in cache:
+            cached_data = cache[cache_key]
+            resume_text = cached_data["raw_text"]
+            extracted_info = cached_data["extracted_info"]
+        elif not resume_text:
+            return create_response(400, {"error": "缺少简历数据，请先上传简历或提供 cache_key"})
+        
+        # 计算匹配度
+        logger.info("开始计算匹配度...")
+        match_result = resume_matcher.match(resume_text, job_description, extracted_info)
+        
+        return create_response(200, {
+            "success": True,
+            "message": "匹配分析完成",
+            "data": match_result
+        })
+        
+    except Exception as e:
+        logger.error(f"匹配分析失败: {str(e)}")
+        return create_response(500, {"error": f"匹配分析失败: {str(e)}"})
+
+
+def parse_multipart(body, content_type):
+    """解析 multipart/form-data 数据"""
+    try:
+        # 获取 boundary
+        boundary = None
+        for part in content_type.split(";"):
+            part = part.strip()
+            if part.startswith("boundary="):
+                boundary = part[9:].strip('"')
+                break
+        
+        if not boundary:
+            return None
+        
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        
+        boundary_bytes = boundary.encode("utf-8")
+        parts = body.split(b"--" + boundary_bytes)
+        
+        for part in parts:
+            if b"Content-Disposition" in part and b"filename" in part:
+                # 找到文件部分
+                header_end = part.find(b"\r\n\r\n")
+                if header_end != -1:
+                    file_data = part[header_end + 4:]
+                    # 移除尾部的 boundary 标记
+                    if file_data.endswith(b"\r\n"):
+                        file_data = file_data[:-2]
+                    if file_data.endswith(b"--"):
+                        file_data = file_data[:-2]
+                    if file_data.endswith(b"\r\n"):
+                        file_data = file_data[:-2]
+                    return file_data
+        
+        return None
+    except Exception as e:
+        logger.error(f"解析 multipart 失败: {str(e)}")
+        return None
+
+
+def handler(event, context):
+    """阿里云函数计算入口"""
+    try:
+        # 解析事件
+        if isinstance(event, str):
+            event = json.loads(event)
+        elif isinstance(event, bytes):
+            event = json.loads(event.decode("utf-8"))
+        
+        # 获取 HTTP 方法和路径
+        http_method = event.get("httpMethod", "GET")
+        path = event.get("path", "/")
+        
+        logger.info(f"收到请求: {http_method} {path}")
+        
+        # 处理 CORS 预检请求
+        if http_method == "OPTIONS":
+            return create_response(200, {"message": "OK"})
+        
+        # 路由处理
+        if path == "/upload" and http_method == "POST":
+            return handle_upload(event)
+        elif path == "/match" and http_method == "POST":
+            return handle_match(event)
+        elif path == "/health" or path == "/":
+            return create_response(200, {
+                "success": True,
+                "message": "简历分析 API 服务运行正常",
+                "version": "1.0.0",
+                "endpoints": {
+                    "POST /upload": "上传并解析简历",
+                    "POST /match": "简历与岗位匹配评分"
+                }
+            })
+        else:
+            return create_response(404, {"error": "接口不存在"})
+            
+    except Exception as e:
+        logger.error(f"处理请求失败: {str(e)}")
+        return create_response(500, {"error": f"服务器内部错误: {str(e)}"})
+

@@ -1,0 +1,41 @@
+edition: 3.0.0
+name: cv-analysis-api
+access: default
+
+vars:
+  region: cn-hangzhou
+  service:
+    name: cv-analysis
+    description: 简历分析 RESTful API 服务
+
+resources:
+  cv-analysis-func:
+    component: fc3
+    props:
+      region: ${vars.region}
+      functionName: cv-analysis-api
+      description: 简历分析服务 - 支持简历解析、信息提取和岗位匹配
+      runtime: python3.10
+      cpu: 0.5
+      memorySize: 512
+      diskSize: 512
+      instanceConcurrency: 10
+      timeout: 60
+      code: ./code
+      handler: index.handler
+      # 环境变量配置（可选）
+      # 如需启用 AI 增强功能，请在阿里云函数计算控制台配置 DASHSCOPE_API_KEY
+      # 或取消下面的注释并设置环境变量后部署
+      # environmentVariables:
+      #   DASHSCOPE_API_KEY: ${env.DASHSCOPE_API_KEY}
+      triggers:
+        - triggerName: httpTrigger
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            methods:
+              - GET
+              - POST
+              - OPTIONS
+            disableURLInternet: false
+
