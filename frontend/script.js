@@ -167,14 +167,23 @@ async function handleAnalyze() {
         });
 
         const result = await response.json();
+        console.log('API 返回结果:', result);
 
-        if (!response.ok || !result.success) {
+        if (!response.ok) {
+            throw new Error(result.error || `请求失败: ${response.status}`);
+        }
+        
+        if (!result.success) {
             throw new Error(result.error || '解析失败');
+        }
+        
+        if (!result.data) {
+            throw new Error('返回数据为空');
         }
 
         // 保存结果
         state.parsedData = result.data;
-        state.cacheKey = result.data.cache_key;
+        state.cacheKey = result.data.cache_key || '';
 
         // 显示结果
         displayParsedResult(result.data);

@@ -25,17 +25,12 @@ resume_matcher = ResumeMatcher()
 cache = {}
 
 
-def create_response(status_code, body, cors=True):
+def create_response(status_code, body, origin=None):
     """创建 HTTP 响应"""
+    # 阿里云 FC 会自动处理 CORS，不要在这里重复设置
     headers = {
         "Content-Type": "application/json; charset=utf-8"
     }
-    if cors:
-        headers.update({
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With"
-        })
     
     return {
         "statusCode": status_code,
@@ -44,7 +39,7 @@ def create_response(status_code, body, cors=True):
     }
 
 
-def handle_upload(event):
+def handle_upload(event, origin=None):
     """处理简历上传和解析"""
     try:
         # 获取请求体
@@ -55,7 +50,8 @@ def handle_upload(event):
             body = base64.b64decode(body)
         
         # 解析 multipart/form-data 或 JSON
-        content_type = event.get("headers", {}).get("content-type", "")
+        headers = event.get("headers", {})
+        content_type = headers.get("content-type") or headers.get("Content-Type", "")
         
         if "multipart/form-data" in content_type:
             # 解析 multipart 数据
@@ -67,17 +63,17 @@ def handle_upload(event):
             json_body = json.loads(body)
             pdf_data = base64.b64decode(json_body.get("file", ""))
         else:
-            return create_response(400, {"error": "不支持的内容类型"})
+            return create_response(400, {"error": "不支持的内容类型"}, origin)
         
         if not pdf_data:
-            return create_response(400, {"error": "未找到 PDF 文件"})
+            return create_response(400, {"error": "未找到 PDF 文件"}, origin)
         
         # 解析 PDF
         logger.info("开始解析 PDF...")
         parsed_result = resume_parser.parse(pdf_data)
         
         if not parsed_result["success"]:
-            return create_response(400, {"error": parsed_result["error"]})
+            return create_response(400, {"error": parsed_result["error"]}, origin)
         
         # 提取关键信息
         logger.info("开始提取关键信息...")
@@ -101,14 +97,14 @@ def handle_upload(event):
             "success": True,
             "message": "简历解析成功",
             "data": result
-        })
+        }, origin)
         
     except Exception as e:
         logger.error(f"处理上传失败: {str(e)}")
-        return create_response(500, {"error": f"处理失败: {str(e)}"})
+        return create_response(500, {"error": f"处理失败: {str(e)}"}, origin)
 
 
-def handle_match(event):
+def handle_match(event, origin=None):
     """处理简历与岗位匹配"""
     try:
         body = event.get("body", "")
@@ -128,7 +124,7 @@ def handle_match(event):
         extracted_info = json_body.get("extracted_info", {})
         
         if not job_description:
-            return create_response(400, {"error": "缺少岗位描述"})
+            return create_response(400, {"error": "缺少岗位描述"}, origin)
         
         # 优先使用缓存的简历数据
         if cache_key and cache_key in cache:
@@ -136,7 +132,7 @@ def handle_match(event):
             resume_text = cached_data["raw_text"]
             extracted_info = cached_data["extracted_info"]
         elif not resume_text:
-            return create_response(400, {"error": "缺少简历数据，请先上传简历或提供 cache_key"})
+            return create_response(400, {"error": "缺少简历数据，请先上传简历或提供 cache_key"}, origin)
         
         # 计算匹配度
         logger.info("开始计算匹配度...")
@@ -146,11 +142,11 @@ def handle_match(event):
             "success": True,
             "message": "匹配分析完成",
             "data": match_result
-        })
+        }, origin)
         
     except Exception as e:
         logger.error(f"匹配分析失败: {str(e)}")
-        return create_response(500, {"error": f"匹配分析失败: {str(e)}"})
+        return create_response(500, {"error": f"匹配分析失败: {str(e)}"}, origin)
 
 
 def parse_multipart(body, content_type):
@@ -194,6 +190,14 @@ def parse_multipart(body, content_type):
         return None
 
 
+def get_origin(event):
+    """获取请求的 Origin"""
+    headers = event.get("headers", {})
+    # headers 可能是小写的
+    origin = headers.get("origin") or headers.get("Origin") or "https://jingwangl.github.io"
+    return origin
+
+
 def handler(event, context):
     """阿里云函数计算入口"""
     try:
@@ -203,21 +207,24 @@ def handler(event, context):
         elif isinstance(event, bytes):
             event = json.loads(event.decode("utf-8"))
         
+        # 获取请求来源
+        origin = get_origin(event)
+        
         # 获取 HTTP 方法和路径
         http_method = event.get("httpMethod", "GET")
         path = event.get("path", "/")
         
-        logger.info(f"收到请求: {http_method} {path}")
+        logger.info(f"收到请求: {http_method} {path} from {origin}")
         
         # 处理 CORS 预检请求
         if http_method == "OPTIONS":
-            return create_response(200, {"message": "OK"})
+            return create_response(200, {"message": "OK"}, origin)
         
         # 路由处理
         if path == "/upload" and http_method == "POST":
-            return handle_upload(event)
+            return handle_upload(event, origin)
         elif path == "/match" and http_method == "POST":
-            return handle_match(event)
+            return handle_match(event, origin)
         elif path == "/health" or path == "/":
             return create_response(200, {
                 "success": True,
@@ -227,9 +234,9 @@ def handler(event, context):
                     "POST /upload": "上传并解析简历",
                     "POST /match": "简历与岗位匹配评分"
                 }
-            })
+            }, origin)
         else:
-            return create_response(404, {"error": "接口不存在"})
+            return create_response(404, {"error": "接口不存在"}, origin)
             
     except Exception as e:
         logger.error(f"处理请求失败: {str(e)}")
