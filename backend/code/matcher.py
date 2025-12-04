@@ -3,9 +3,7 @@
 简历与岗位匹配评分模块
 """
 import re
-import math
 import logging
-from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +68,6 @@ class ResumeMatcher:
                     "score": 0,
                     "analysis": ""
                 },
-                "text_similarity_score": 0,
                 "recommendations": [job_validity["reason"]]
             }
         
@@ -101,9 +98,6 @@ class ResumeMatcher:
         # 详细记录匹配过程
         logger.info(f"技能匹配结果: 匹配={skill_result.get('matched_skills', [])}, 缺失={skill_result.get('missing_skills', [])}, 额外={skill_result.get('extra_skills', [])}")
         
-        # 计算文本相似度（改进版）
-        similarity = self._calc_similarity_improved(resume_text, job_description)
-        
         # 计算经验匹配
         exp_result = {"score": 70, "analysis": "未检测到明确经验要求"}
         if extracted_info:
@@ -118,12 +112,11 @@ class ResumeMatcher:
             job_description
         )
         
-        # 综合评分（移除关键词匹配，权重重新分配）
+        # 综合评分（移除文本相似度，权重重新分配）
         overall = (
-            skill_result["score"] * 0.45 +      # 技能匹配权重提升：35% → 45%
-            similarity * 0.30 +                  # 文本相似度权重提升：25% → 30%
-            exp_result["score"] * 0.15 +        # 经验匹配：15%（不变）
-            edu_result["score"] * 0.10           # 学历匹配：10%（不变）
+            skill_result["score"] * 0.60 +      # 技能匹配权重：45% → 60%（+15%）
+            exp_result["score"] * 0.25 +        # 经验匹配权重：15% → 25%（+10%）
+            edu_result["score"] * 0.15          # 学历匹配权重：10% → 15%（+5%）
         )
         
         # 如果岗位描述中没有提取到任何技能，降低评分
@@ -135,7 +128,6 @@ class ResumeMatcher:
             "skill_match": skill_result,
             "experience_match": exp_result,
             "education_match": edu_result,
-            "text_similarity_score": round(similarity, 1),
             "recommendations": self._generate_recommendations(skill_result, exp_result, overall, job_skills)
         }
     
@@ -346,48 +338,6 @@ class ResumeMatcher:
             "missing_skills": missing_original,
             "extra_skills": extra_original
         }
-    
-    def _calc_similarity_improved(self, text1, text2):
-        """改进的文本相似度计算"""
-        def tokenize(text):
-            # 提取中文词和英文词
-            words = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z]{2,}', text.lower())
-            # 过滤掉纯数字和单个字符
-            words = [w for w in words if not w.isdigit() and len(w) > 1]
-            return words
-        
-        words1 = tokenize(text1)
-        words2 = tokenize(text2)
-        
-        if not words1 or not words2:
-            return 0  # 如果一方没有有效词汇，相似度为0
-        
-        # 如果一方词汇太少，可能是无效输入
-        if len(words2) < 3:
-            return 0
-        
-        c1 = Counter(words1)
-        c2 = Counter(words2)
-        
-        all_words = set(c1.keys()) | set(c2.keys())
-        
-        v1 = [c1.get(w, 0) for w in all_words]
-        v2 = [c2.get(w, 0) for w in all_words]
-        
-        dot = sum(a * b for a, b in zip(v1, v2))
-        n1 = math.sqrt(sum(a * a for a in v1))
-        n2 = math.sqrt(sum(b * b for b in v2))
-        
-        if n1 == 0 or n2 == 0:
-            return 0
-        
-        similarity = dot / (n1 * n2) * 100
-        
-        # 如果相似度异常高但词汇差异很大，可能是巧合，降低分数
-        if similarity > 80 and len(set(words1) & set(words2)) < len(words2) * 0.3:
-            similarity = similarity * 0.7
-        
-        return round(similarity, 1)
     
     def _calc_experience_match(self, optional_info, job_desc):
         """计算经验匹配"""
