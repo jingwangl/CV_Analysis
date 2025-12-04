@@ -98,7 +98,7 @@ SKILL_KEYWORDS = [
     "sql优化", "sql optimization", "数据库优化", "database optimization",
     "性能优化", "performance optimization", "性能调优", "performance tuning",
     "缓存", "cache", "缓存策略", "caching strategy",
-    "负载均衡", "load balancing", "高可用", "high availability", "ha",
+    "负载均衡", "load balancing",  "high availability", "ha",
     "容灾", "disaster recovery", "备份", "backup", "恢复", "recovery",
     "安全", "security", "加密", "encryption", "认证", "authentication", "授权", "authorization",
     "oauth", "oauth2", "jwt", "token", "saml", "ldap", "单点登录", "sso",
