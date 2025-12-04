@@ -474,10 +474,18 @@ function displayMatchResult(data) {
 
 // 更新评分条
 function updateScoreBar(type, score) {
-    document.getElementById(`${type}-score`).textContent = Math.round(score);
-    setTimeout(() => {
-        document.getElementById(`${type}-bar`).style.width = `${score}%`;
-    }, 100);
+    const scoreElement = document.getElementById(`${type}-score`);
+    const barElement = document.getElementById(`${type}-bar`);
+    
+    if (scoreElement) {
+        scoreElement.textContent = Math.round(score);
+    }
+    
+    if (barElement) {
+        setTimeout(() => {
+            barElement.style.width = `${score}%`;
+        }, 100);
+    }
 }
 
 // 更新步骤
