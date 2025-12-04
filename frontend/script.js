@@ -349,12 +349,10 @@ function displayMatchResult(data) {
 
     // 详细评分
     const skillScore = data.skill_match?.score || 0;
-    const keywordScore = data.keyword_match?.score || 0;
     const expScore = data.experience_match?.score || 0;
     const eduScore = data.education_match?.score || 0;
 
     updateScoreBar('skill', skillScore);
-    updateScoreBar('keyword', keywordScore);
     updateScoreBar('exp', expScore);
     updateScoreBar('edu', eduScore);
 

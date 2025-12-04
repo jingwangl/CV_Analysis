@@ -1,13 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-简历与岗位匹配评分模块 - 优化版（支持 AI 分析）
+简历与岗位匹配评分模块
 """
 import re
 import math
-import os
-import json
 import logging
-import http.client
 from collections import Counter
 
 logger = logging.getLogger(__name__)
@@ -17,18 +14,10 @@ class ResumeMatcher:
     """简历匹配器"""
     
     def __init__(self):
-        # 检查是否配置了 AI API
-        self.api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-        self.use_ai = bool(self.api_key)
-        if self.use_ai:
-            logger.info("AI 分析功能已启用（DashScope）")
-        else:
-            logger.info("AI 分析功能未启用，使用传统匹配算法")
-        
         # 扩展技能关键词库
         self.skill_keywords = [
-            # 编程语言
-            "python", "java", "javascript", "typescript", "c++", "c#", "go", "rust", "php", "ruby",
+            # 编程语言（按常见度排序，优先匹配）
+            "java", "python", "go", "c++", "javascript", "typescript", "c#", "rust", "php", "ruby",
             "swift", "kotlin", "scala", "r语言", "perl", "lua",
             # 前端框架
             "react", "vue", "angular", "node.js", "node", "jquery", "bootstrap",
@@ -36,11 +25,15 @@ class ResumeMatcher:
             "spring", "springboot", "django", "flask", "fastapi", "express", "laravel", "rails",
             "mybatis", "hibernate", "struts",
             # 数据库
-            "mysql", "postgresql", "mongodb", "redis", "oracle", "sql server", "sqlite",
-            "elasticsearch", "hbase", "cassandra", "neo4j",
+            "mysql", "oracle", "postgresql", "mongodb", "redis", "sql server", "sqlite",
+            "elasticsearch", "hbase", "cassandra", "neo4j"
             # 工具和平台
             "docker", "kubernetes", "k8s", "aws", "azure", "gcp", "阿里云", "腾讯云",
             "linux", "git", "jenkins", "ci/cd", "nginx", "apache",
+            # 网络协议和技术
+            "tcp/ip", "tcp", "http", "https", "websocket", "grpc",
+            # 系统和技术概念
+            "多线程", "网络编程", "jvm", "sql优化", "性能优化",
             # AI/ML
             "机器学习", "深度学习", "tensorflow", "pytorch", "keras", "scikit-learn",
             "nlp", "自然语言处理", "计算机视觉", "cnn", "rnn", "lstm", "transformer",
@@ -77,22 +70,36 @@ class ResumeMatcher:
                     "score": 0,
                     "analysis": ""
                 },
-                "keyword_match": {
-                    "score": 0,
-                    "matched_keywords": [],
-                    "total_keywords": 0
-                },
                 "text_similarity_score": 0,
-                "recommendations": [job_validity["reason"]],
-                "ai_analysis": None
+                "recommendations": [job_validity["reason"]]
             }
         
         # 提取技能
-        resume_skills = self._extract_skills(resume_text)
+        resume_skills_from_text = self._extract_skills(resume_text)
         job_skills = self._extract_skills(job_description)
         
+        # 如果 extracted_info 中有技能信息，优先使用（格式可能不同）
+        resume_skills_from_info = []
+        if extracted_info and "skills" in extracted_info:
+            resume_skills_from_info = extracted_info["skills"]
+            if isinstance(resume_skills_from_info, list):
+                # 标准化技能名称（转为小写）
+                resume_skills_from_info = [s.lower() if isinstance(s, str) else str(s).lower() for s in resume_skills_from_info]
+        
+        # 合并两个来源的技能，去重
+        all_resume_skills = list(set(resume_skills_from_text + resume_skills_from_info))
+        
+        # 记录提取的技能（用于调试）
+        logger.info(f"从岗位描述中提取到技能: {job_skills} (共{len(job_skills)}个)")
+        logger.info(f"从简历文本中提取到技能: {resume_skills_from_text} (共{len(resume_skills_from_text)}个)")
+        logger.info(f"从简历信息中提取到技能: {resume_skills_from_info} (共{len(resume_skills_from_info)}个)")
+        logger.info(f"合并后的简历技能: {all_resume_skills} (共{len(all_resume_skills)}个)")
+        
         # 计算技能匹配
-        skill_result = self._calc_skill_match(resume_skills, job_skills)
+        skill_result = self._calc_skill_match(all_resume_skills, job_skills)
+        
+        # 详细记录匹配过程
+        logger.info(f"技能匹配结果: 匹配={skill_result.get('matched_skills', [])}, 缺失={skill_result.get('missing_skills', [])}, 额外={skill_result.get('extra_skills', [])}")
         
         # 计算文本相似度（改进版）
         similarity = self._calc_similarity_improved(resume_text, job_description)
@@ -111,49 +118,13 @@ class ResumeMatcher:
             job_description
         )
         
-        # 计算关键词匹配
-        keyword_result = self._calc_keyword_match(resume_text, job_description)
-        
-        # AI 分析（如果可用）
-        ai_result = None
-        ai_score = None
-        if self.use_ai:
-            try:
-                ai_result = self._ai_analyze_match(
-                    resume_text, 
-                    job_description, 
-                    extracted_info,
-                    skill_result,
-                    exp_result,
-                    edu_result
-                )
-                if ai_result and "score" in ai_result:
-                    ai_score = ai_result["score"]
-                    logger.info(f"AI 分析完成，评分: {ai_score}")
-            except Exception as e:
-                logger.error(f"AI 分析失败: {str(e)}", exc_info=True)
-                ai_result = {"error": str(e)}
-        
-        # 综合评分（调整权重）
-        if ai_score is not None:
-            # 如果 AI 分析可用，使用 AI 评分作为主要参考，传统算法作为辅助
-            overall = (
-                ai_score * 0.50 +  # AI 评分权重 50%
-                skill_result["score"] * 0.20 +
-                similarity * 0.15 +
-                exp_result["score"] * 0.08 +
-                edu_result["score"] * 0.05 +
-                keyword_result["score"] * 0.02
-            )
-        else:
-            # 传统算法评分
-            overall = (
-                skill_result["score"] * 0.35 +
-                similarity * 0.25 +
-                exp_result["score"] * 0.15 +
-                edu_result["score"] * 0.10 +
-                keyword_result["score"] * 0.15
-            )
+        # 综合评分（移除关键词匹配，权重重新分配）
+        overall = (
+            skill_result["score"] * 0.45 +      # 技能匹配权重提升：35% → 45%
+            similarity * 0.30 +                  # 文本相似度权重提升：25% → 30%
+            exp_result["score"] * 0.15 +        # 经验匹配：15%（不变）
+            edu_result["score"] * 0.10           # 学历匹配：10%（不变）
+        )
         
         # 如果岗位描述中没有提取到任何技能，降低评分
         if not job_skills and len(job_description.strip()) < 50:
@@ -164,10 +135,8 @@ class ResumeMatcher:
             "skill_match": skill_result,
             "experience_match": exp_result,
             "education_match": edu_result,
-            "keyword_match": keyword_result,
             "text_similarity_score": round(similarity, 1),
-            "recommendations": self._generate_recommendations(skill_result, exp_result, overall, job_skills, ai_result),
-            "ai_analysis": ai_result
+            "recommendations": self._generate_recommendations(skill_result, exp_result, overall, job_skills)
         }
     
     def _validate_job_description(self, job_desc):
@@ -199,18 +168,103 @@ class ResumeMatcher:
             return {"valid": False, "reason": "岗位描述内容不足，请提供更详细的岗位要求、技能要求等信息"}
     
     def _extract_skills(self, text):
-        """提取技能"""
+        """提取技能（改进版，支持中文标点和特殊格式）"""
+        if not text:
+            return []
+        
+        # 预处理文本：将中文标点和连接词替换为空格，便于匹配
         text_lower = text.lower()
+        # 替换常见的中文标点和连接词为空格（包括中文顿号、逗号等）
+        text_normalized = re.sub(r'[、，,；;或|等]', ' ', text_lower)
+        # 移除多余空格，但保留单个空格
+        text_normalized = re.sub(r'\s+', ' ', text_normalized)
+        
+        # 调试：记录处理后的文本片段
+        if len(text_normalized) > 0:
+            logger.debug(f"技能提取 - 原始文本片段: {text[:200]}")
+            logger.debug(f"技能提取 - 标准化后文本片段: {text_normalized[:200]}")
+        
         found = []
-        for skill in self.skill_keywords:
-            # 使用单词边界匹配，避免误匹配
-            pattern = r'\b' + re.escape(skill) + r'\b'
-            if re.search(pattern, text_lower):
-                found.append(skill)
-        return found
+        found_positions = {}  # 记录已找到的技能位置，避免重复
+        
+        # 按长度从长到短排序，优先匹配长技能（如 "tcp/ip" 应该在 "tcp" 之前）
+        sorted_skills = sorted(self.skill_keywords, key=lambda x: len(x), reverse=True)
+        
+        for skill in sorted_skills:
+            # 跳过已找到的技能（避免重复）
+            if skill in found:
+                continue
+            
+            skill_lower = skill.lower()
+            skill_escaped = re.escape(skill_lower)
+            
+            # 构建匹配模式
+            # 对于包含特殊字符的技能（如 c++, c#, tcp/ip），使用精确匹配
+            if '+' in skill or '#' in skill or '/' in skill:
+                # 特殊字符技能：在标点符号或空格前后都可以匹配
+                # 例如：匹配 "c++"、"C++"、"c++，"、" c++ " 等
+                # 注意：对于 "tcp/ip"，需要匹配 "tcp/ip" 或 "tcp ip" 或 "tcpip"
+                if '/' in skill:
+                    # 对于 tcp/ip，也匹配 tcp ip 或 tcpip
+                    parts = skill.split('/')
+                    pattern = r'(?:^|[\s、，,；;或|])' + re.escape(parts[0].lower()) + r'[\s/]*' + re.escape(parts[1].lower()) + r'(?:[\s、，,；;或|]|$)'
+                else:
+                    pattern = r'(?:^|[\s、，,；;或|])' + skill_escaped + r'(?:[\s、，,；;或|]|$)'
+            elif re.match(r'^[a-zA-Z0-9]+$', skill):
+                # 纯字母数字技能：使用单词边界
+                # 在标准化文本中，单词边界应该能正确匹配
+                # 但为了更可靠，也在标点符号前后匹配
+                pattern = r'(?:^|\b|[\s、，,；;或|])' + skill_escaped + r'(?:\b|[\s、，,；;或|]|$)'
+            else:
+                # 中文技能或其他：直接匹配
+                pattern = skill_escaped
+            
+            # 在标准化文本中搜索（已处理标点符号）
+            matches = list(re.finditer(pattern, text_normalized, re.IGNORECASE))
+            
+            # 如果没找到，也在原始小写文本中搜索（处理一些边界情况）
+            if not matches:
+                matches = list(re.finditer(pattern, text_lower, re.IGNORECASE))
+            
+            # 处理匹配结果
+            for match in matches:
+                start, end = match.span()
+                # 检查是否与已找到的技能重叠（如果新技能更长，替换旧的）
+                overlap = False  # 初始化 overlap 变量
+                overlap_skills = []
+                for existing_skill, (existing_start, existing_end) in found_positions.items():
+                    if not (end <= existing_start or start >= existing_end):
+                        # 如果新技能更长，替换旧技能
+                        if len(skill) > len(existing_skill):
+                            overlap_skills.append(existing_skill)
+                        else:
+                            overlap = True
+                            break
+                
+                if not overlap:
+                    # 移除被替换的技能
+                    for old_skill in overlap_skills:
+                        if old_skill in found:
+                            found.remove(old_skill)
+                        if old_skill in found_positions:
+                            del found_positions[old_skill]
+                    
+                    found.append(skill)
+                    found_positions[skill] = (start, end)
+                    break  # 每个技能只记录一次
+        
+        # 去重并保持顺序
+        seen = set()
+        result = []
+        for skill in found:
+            if skill not in seen:
+                seen.add(skill)
+                result.append(skill)
+        
+        return result
     
     def _calc_skill_match(self, resume_skills, job_skills):
-        """计算技能匹配度"""
+        """计算技能匹配度（标准化技能名称后匹配）"""
         if not job_skills:
             return {
                 "score": 50,  # 没有技能要求时给中等分
@@ -219,21 +273,78 @@ class ResumeMatcher:
                 "extra_skills": []
             }
         
-        resume_set = set(resume_skills)
-        job_set = set(job_skills)
+        # 标准化技能名称：全部转为小写，去除空格，处理等价技能
+        def normalize_skill(skill):
+            if not isinstance(skill, str):
+                skill = str(skill)
+            skill = skill.lower().strip()
+            # 处理等价技能：tcp/ip 和 tcp 等价，http 和 https 不等价但可以关联
+            # 将 tcp/ip 标准化为 tcp（因为如果会 tcp/ip，肯定也会 tcp）
+            if skill == "tcp/ip":
+                return "tcp"
+            return skill
         
-        matched = resume_set & job_set
-        missing = job_set - resume_set
-        extra = resume_set - job_set
+        # 创建标准化映射，同时保留原始技能
+        resume_normalized = [normalize_skill(s) for s in resume_skills]
+        job_normalized = [normalize_skill(s) for s in job_skills]
+        
+        # 创建反向映射：标准化技能 -> 原始技能列表
+        resume_normalized_to_original = {}
+        for orig, norm in zip(resume_skills, resume_normalized):
+            if norm not in resume_normalized_to_original:
+                resume_normalized_to_original[norm] = []
+            resume_normalized_to_original[norm].append(orig)
+        
+        job_normalized_to_original = {}
+        for orig, norm in zip(job_skills, job_normalized):
+            if norm not in job_normalized_to_original:
+                job_normalized_to_original[norm] = []
+            job_normalized_to_original[norm].append(orig)
+        
+        # 使用标准化后的技能进行匹配
+        resume_set = set(resume_normalized)
+        job_set = set(job_normalized)
+        
+        # 详细日志：显示标准化后的技能
+        logger.info(f"标准化后的简历技能: {resume_set}")
+        logger.info(f"标准化后的岗位技能: {job_set}")
+        
+        matched_normalized = resume_set & job_set
+        missing_normalized = job_set - resume_set
+        extra_normalized = resume_set - job_set
+        
+        logger.info(f"标准化后的匹配结果: 匹配={matched_normalized}, 缺失={missing_normalized}, 额外={extra_normalized}")
+        
+        # 将匹配结果映射回原始技能名称（保留原始格式）
+        # 优先使用岗位描述中的原始格式，如果岗位中没有则使用简历中的
+        matched_original = []
+        for norm_skill in matched_normalized:
+            # 优先使用岗位描述中的原始格式
+            if norm_skill in job_normalized_to_original:
+                matched_original.append(job_normalized_to_original[norm_skill][0])
+            elif norm_skill in resume_normalized_to_original:
+                matched_original.append(resume_normalized_to_original[norm_skill][0])
+        
+        missing_original = []
+        for norm_skill in missing_normalized:
+            if norm_skill in job_normalized_to_original:
+                missing_original.append(job_normalized_to_original[norm_skill][0])
+        
+        extra_original = []
+        for norm_skill in extra_normalized:
+            if norm_skill in resume_normalized_to_original:
+                extra_original.append(resume_normalized_to_original[norm_skill][0])
         
         # 计算匹配度：匹配的技能数 / 要求的技能数
-        score = len(matched) / len(job_set) * 100 if job_set else 50
+        score = len(matched_normalized) / len(job_set) * 100 if job_set else 50
+        
+        logger.info(f"技能匹配详情: 匹配={matched_original}, 缺失={missing_original}, 额外={extra_original}")
         
         return {
             "score": round(score, 1),
-            "matched_skills": list(matched),
-            "missing_skills": list(missing),
-            "extra_skills": list(extra)
+            "matched_skills": matched_original,
+            "missing_skills": missing_original,
+            "extra_skills": extra_original
         }
     
     def _calc_similarity_improved(self, text1, text2):
@@ -277,49 +388,6 @@ class ResumeMatcher:
             similarity = similarity * 0.7
         
         return round(similarity, 1)
-    
-    def _calc_keyword_match(self, resume_text, job_desc):
-        """计算关键词匹配"""
-        # 提取岗位描述中的关键词
-        job_keywords = self._extract_keywords(job_desc)
-        resume_keywords = self._extract_keywords(resume_text)
-        
-        if not job_keywords:
-            return {
-                "score": 50,
-                "matched_keywords": [],
-                "total_keywords": 0
-            }
-        
-        matched = set(job_keywords) & set(resume_keywords)
-        score = len(matched) / len(job_keywords) * 100 if job_keywords else 50
-        
-        return {
-            "score": round(score, 1),
-            "matched_keywords": list(matched),
-            "total_keywords": len(job_keywords)
-        }
-    
-    def _extract_keywords(self, text):
-        """提取关键词（技能、技术栈、工具等）"""
-        keywords = []
-        text_lower = text.lower()
-        
-        # 提取技能关键词
-        for skill in self.skill_keywords:
-            if skill in text_lower:
-                keywords.append(skill)
-        
-        # 提取其他常见关键词
-        common_keywords = [
-            "开发", "设计", "测试", "运维", "管理", "分析", "优化",
-            "项目", "团队", "沟通", "协作", "学习", "创新"
-        ]
-        for kw in common_keywords:
-            if kw in text:
-                keywords.append(kw)
-        
-        return list(set(keywords))
     
     def _calc_experience_match(self, optional_info, job_desc):
         """计算经验匹配"""
@@ -389,17 +457,9 @@ class ResumeMatcher:
         else:
             return {"score": 30, "analysis": f"学历不满足要求（要求{required_edu}，实际{resume_edu or '未识别'}）"}
     
-    def _generate_recommendations(self, skill_result, exp_result, overall, job_skills, ai_result=None):
+    def _generate_recommendations(self, skill_result, exp_result, overall, job_skills):
         """生成改进建议"""
         recs = []
-        
-        # 优先使用 AI 建议
-        if ai_result and "recommendations" in ai_result:
-            ai_recs = ai_result["recommendations"]
-            if isinstance(ai_recs, list):
-                recs.extend(ai_recs[:3])  # 使用 AI 的前3条建议
-            elif isinstance(ai_recs, str):
-                recs.append(ai_recs)
         
         # 技能相关建议
         missing = skill_result.get("missing_skills", [])
@@ -429,180 +489,3 @@ class ResumeMatcher:
             recs.append("提示：岗位描述中未检测到明确的技能要求，建议提供更详细的岗位描述以获得更精准的匹配分析")
         
         return recs[:5]  # 最多返回5条建议
-    
-    def _ai_analyze_match(self, resume_text, job_description, extracted_info, skill_result, exp_result, edu_result):
-        """使用 AI 模型分析简历与岗位的匹配度"""
-        if not self.api_key:
-            return None
-        
-        try:
-            # 构建提示词
-            prompt = self._build_ai_prompt(resume_text, job_description, extracted_info, skill_result, exp_result, edu_result)
-            
-            # 调用 DashScope API
-            response = self._call_dashscope_api(prompt)
-            
-            if response:
-                # 解析 AI 返回结果
-                return self._parse_ai_response(response)
-            else:
-                return None
-                
-        except Exception as e:
-            logger.error(f"AI 分析异常: {str(e)}", exc_info=True)
-            return {"error": str(e)}
-    
-    def _build_ai_prompt(self, resume_text, job_description, extracted_info, skill_result, exp_result, edu_result):
-        """构建 AI 分析提示词"""
-        # 提取关键信息摘要
-        basic_info = extracted_info.get("basic_info", {}) if extracted_info else {}
-        optional_info = extracted_info.get("optional_info", {}) if extracted_info else {}
-        
-        prompt = f"""你是一位专业的 HR 招聘专家，请对以下简历与岗位的匹配度进行深度分析。
-
-## 岗位要求：
-{job_description}
-
-## 简历信息：
-
-### 基本信息：
-- 姓名：{basic_info.get('name', '未识别')}
-- 电话：{basic_info.get('phone', '未识别')}
-- 邮箱：{basic_info.get('email', '未识别')}
-- 地址：{basic_info.get('address', '未识别')}
-
-### 其他信息：
-- 求职意向：{optional_info.get('job_intention', '未识别')}
-- 工作年限：{optional_info.get('experience_years', '未识别')}
-- 学历：{optional_info.get('education', '未识别')}
-
-### 技能匹配情况：
-- 已匹配技能：{', '.join(skill_result.get('matched_skills', [])[:10])}
-- 缺失技能：{', '.join(skill_result.get('missing_skills', [])[:10])}
-
-### 经验匹配：{exp_result.get('analysis', '未分析')}
-### 学历匹配：{edu_result.get('analysis', '未分析')}
-
-### 完整简历文本（前2000字）：
-{resume_text[:2000]}
-
-## 分析任务：
-
-请从以下维度进行专业分析，并给出 0-100 的匹配度评分：
-
-1. **技能匹配度**：简历中的技能是否满足岗位要求
-2. **经验匹配度**：工作经验和项目经历是否与岗位需求相关
-3. **学历匹配度**：学历背景是否符合岗位要求
-4. **综合匹配度**：整体评估简历与岗位的匹配程度
-
-请以 JSON 格式返回分析结果，格式如下：
-{{
-    "score": 85,
-    "skill_analysis": "技能匹配度分析...",
-    "experience_analysis": "经验匹配度分析...",
-    "education_analysis": "学历匹配度分析...",
-    "overall_analysis": "综合匹配度分析...",
-    "strengths": ["优势1", "优势2"],
-    "weaknesses": ["不足1", "不足2"],
-    "recommendations": ["建议1", "建议2", "建议3"]
-}}
-
-请确保返回的是有效的 JSON 格式，不要包含任何其他文字说明。"""
-        
-        return prompt
-    
-    def _call_dashscope_api(self, prompt):
-        """调用 DashScope API"""
-        try:
-            conn = http.client.HTTPSConnection("dashscope.aliyuncs.com")
-            
-            payload = json.dumps({
-                "model": "qwen-turbo",
-                "input": {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ]
-                },
-                "parameters": {
-                    "temperature": 0.3,
-                    "max_tokens": 2000
-                }
-            })
-            
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {self.api_key}'
-            }
-            
-            conn.request("POST", "/api/v1/services/aigc/text-generation/generation", payload, headers)
-            res = conn.getresponse()
-            data = res.read()
-            
-            if res.status == 200:
-                result = json.loads(data.decode("utf-8"))
-                if "output" in result and "choices" in result["output"]:
-                    content = result["output"]["choices"][0]["message"]["content"]
-                    return content
-                else:
-                    logger.error(f"DashScope API 返回格式异常: {result}")
-                    return None
-            else:
-                logger.error(f"DashScope API 调用失败: {res.status} - {data.decode('utf-8')}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"调用 DashScope API 异常: {str(e)}", exc_info=True)
-            return None
-        finally:
-            if 'conn' in locals():
-                conn.close()
-    
-    def _parse_ai_response(self, response_text):
-        """解析 AI 返回的 JSON 结果"""
-        try:
-            # 尝试提取 JSON 部分（可能包含 markdown 代码块）
-            text = response_text.strip()
-            
-            # 移除可能的 markdown 代码块标记
-            if text.startswith("```json"):
-                text = text[7:]
-            elif text.startswith("```"):
-                text = text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-            
-            # 解析 JSON
-            result = json.loads(text)
-            
-            # 验证必要字段
-            if "score" not in result:
-                logger.warning("AI 返回结果缺少 score 字段")
-                return None
-            
-            # 确保 score 在 0-100 范围内
-            score = float(result.get("score", 0))
-            score = max(0, min(100, score))
-            result["score"] = round(score, 1)
-            
-            return result
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"解析 AI 返回 JSON 失败: {str(e)}, 原始内容: {response_text[:200]}")
-            # 尝试从文本中提取数字作为评分
-            score_match = re.search(r'"score"\s*:\s*(\d+(?:\.\d+)?)', response_text)
-            if score_match:
-                score = float(score_match.group(1))
-                score = max(0, min(100, score))
-                return {
-                    "score": round(score, 1),
-                    "error": "JSON 解析失败，仅提取了评分",
-                    "raw_response": response_text[:500]
-                }
-            return None
-        except Exception as e:
-            logger.error(f"解析 AI 响应异常: {str(e)}")
-            return None
