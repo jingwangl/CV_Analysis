@@ -389,20 +389,80 @@ function displayMatchResult(data) {
     const aiSection = document.getElementById('ai-analysis-section');
     const aiContent = document.getElementById('ai-analysis-content');
     
-    if (data.ai_analysis) {
+    if (data.ai_analysis && !data.ai_analysis.error) {
         aiSection.style.display = 'block';
         const ai = data.ai_analysis;
-        aiContent.innerHTML = `
-            <p><strong>总结:</strong> ${escapeHtml(ai.summary || '无')}</p>
-            ${ai.strengths?.length > 0 ? `
-                <p><strong>优势:</strong></p>
+        
+        let aiHtml = '';
+        
+        // AI 评分
+        if (ai.score !== undefined) {
+            aiHtml += `<div class="ai-score">
+                <span class="ai-score-label">AI 匹配评分:</span>
+                <span class="ai-score-value">${ai.score}</span>
+            </div>`;
+        }
+        
+        // 综合分析
+        if (ai.overall_analysis) {
+            aiHtml += `<div class="ai-analysis-item">
+                <p><strong>📊 综合分析:</strong></p>
+                <p>${escapeHtml(ai.overall_analysis)}</p>
+            </div>`;
+        }
+        
+        // 技能分析
+        if (ai.skill_analysis) {
+            aiHtml += `<div class="ai-analysis-item">
+                <p><strong>💼 技能匹配分析:</strong></p>
+                <p>${escapeHtml(ai.skill_analysis)}</p>
+            </div>`;
+        }
+        
+        // 经验分析
+        if (ai.experience_analysis) {
+            aiHtml += `<div class="ai-analysis-item">
+                <p><strong>📈 经验匹配分析:</strong></p>
+                <p>${escapeHtml(ai.experience_analysis)}</p>
+            </div>`;
+        }
+        
+        // 学历分析
+        if (ai.education_analysis) {
+            aiHtml += `<div class="ai-analysis-item">
+                <p><strong>🎓 学历匹配分析:</strong></p>
+                <p>${escapeHtml(ai.education_analysis)}</p>
+            </div>`;
+        }
+        
+        // 优势
+        if (ai.strengths && ai.strengths.length > 0) {
+            aiHtml += `<div class="ai-analysis-item">
+                <p><strong>✅ 优势:</strong></p>
                 <ul>${ai.strengths.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul>
-            ` : ''}
-            ${ai.weaknesses?.length > 0 ? `
-                <p><strong>不足:</strong></p>
+            </div>`;
+        }
+        
+        // 不足
+        if (ai.weaknesses && ai.weaknesses.length > 0) {
+            aiHtml += `<div class="ai-analysis-item">
+                <p><strong>⚠️ 不足:</strong></p>
                 <ul>${ai.weaknesses.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
-            ` : ''}
-        `;
+            </div>`;
+        }
+        
+        // AI 建议（如果单独提供）
+        if (ai.recommendations && ai.recommendations.length > 0) {
+            aiHtml += `<div class="ai-analysis-item">
+                <p><strong>💡 AI 建议:</strong></p>
+                <ul>${ai.recommendations.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>
+            </div>`;
+        }
+        
+        aiContent.innerHTML = aiHtml || '<p>AI 分析结果为空</p>';
+    } else if (data.ai_analysis && data.ai_analysis.error) {
+        // AI 分析失败，显示错误信息（但不显示错误，因为传统算法仍然可用）
+        aiSection.style.display = 'none';
     } else {
         aiSection.style.display = 'none';
     }
