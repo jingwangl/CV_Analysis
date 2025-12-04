@@ -233,6 +233,7 @@ function displayParsedResult(data) {
         ${createInfoItem('求职意向', optionalInfo.job_intention)}
         ${createInfoItem('工作年限', optionalInfo.experience_years)}
         ${createInfoItem('学历背景', optionalInfo.education)}
+        ${createInfoItem('毕业院校', optionalInfo.university)}
     `;
 
     // 技能

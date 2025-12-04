@@ -30,7 +30,8 @@ class InfoExtractor:
             "optional_info": {
                 "job_intention": self._extract_job_intention(cleaned_text),
                 "experience_years": self._extract_experience(cleaned_text),
-                "education": self._extract_education(cleaned_text)
+                "education": self._extract_education(cleaned_text),
+                "university": self._extract_university(cleaned_text)
             },
             "skills": self._extract_skills(cleaned_text),
             "extraction_method": "regex"
@@ -147,21 +148,119 @@ class InfoExtractor:
         return None
     
     def _extract_address(self, text):
-        """提取地址"""
+        """提取地址（排除学校名称）"""
         cities = "北京|上海|广州|深圳|杭州|成都|武汉|南京|西安|重庆|天津|苏州|郑州|长沙|东莞|青岛|沈阳|宁波|昆明|合肥|厦门|无锡|大连|福州|济南|哈尔滨|长春|太原|南昌|南宁|贵阳|海口"
+        
+        # 先查找所有可能的地址匹配
         pattern = rf"({cities})[市]?[^\n,，。]{{0,30}}"
-        match = re.search(pattern, text)
-        return match.group() if match else None
+        matches = list(re.finditer(pattern, text))
+        
+        for match in matches:
+            matched_text = match.group()
+            # 排除学校名称（包含"大学"、"学院"、"学校"等）
+            if not re.search(r'(大学|学院|学校|高校|院校|科技|理工|师范|医科|财经|农业|工业|交通|航空|海洋|政法|艺术|体育|音乐|美术)', matched_text):
+                # 排除明显是教育相关的（如"本科"、"硕士"等）
+                if not re.search(r'(本科|硕士|博士|研究生|学士|毕业|就读|专业)', matched_text):
+                    return matched_text
+        
+        return None
+    
+    def _extract_university(self, text):
+        """提取毕业院校"""
+        # 常见学校关键词
+        school_keywords = [
+            r"大学", r"学院", r"学校", r"高校", r"院校", r"科技大学", r"理工大学", 
+            r"师范大学", r"医科大学", r"财经大学", r"农业大学", r"工业大学",
+            r"交通大学", r"航空航天大学", r"海洋大学", r"政法大学", r"艺术大学"
+        ]
+        
+        # 匹配模式：城市名 + 学校关键词 + 可能的专业信息
+        patterns = [
+            # 模式1：匹配"教育背景"、"学历"等关键词后的学校信息
+            r"(?:教育背景|学历|毕业院校|毕业学校|就读院校|学校)[：:\s]*([^\n\r]{5,50}?)(?:\n|毕业|专业|学历|学位|$)",
+            # 模式2：直接匹配学校名称格式（城市+学校关键词）
+            r"([^\n\r]{2,30}?(?:大学|学院|学校|高校|院校))(?:\s*[（(]|专业|毕业|学历|学位|\n|$)",
+            # 模式3：匹配包含学校关键词的行
+            r"([^\n\r]{2,30}?(?:科技大学|理工大学|师范大学|医科大学|财经大学|农业大学|工业大学|交通大学|航空航天大学|海洋大学|政法大学|艺术大学|大学|学院|学校))",
+        ]
+        
+        for pattern in patterns:
+            matches = list(re.finditer(pattern, text))
+            for match in matches:
+                result = match.group(1).strip()
+                # 清理结果
+                # 移除括号内的内容（如"（本科）"、"（2018-2022）"等）
+                result = re.sub(r'[（(][^）)]*[）)]', '', result)
+                # 移除"毕业"、"就读"等词
+                result = re.sub(r'\s*(毕业|就读|专业|学历|学位)\s*', '', result)
+                # 移除多余空格
+                result = re.sub(r'\s+', ' ', result).strip()
+                
+                # 验证：应该是学校名称
+                if result and re.search(r'(大学|学院|学校|高校|院校)', result):
+                    # 排除明显不是学校的内容
+                    if not re.search(r'(经验|工作|年限|电话|邮箱|地址|姓名)', result):
+                        if 3 <= len(result) <= 50:
+                            return result
+        
+        return None
     
     def _extract_job_intention(self, text):
         """提取求职意向"""
-        patterns = [
-            r"(?:求职意向|期望职位|应聘岗位|目标职位)[：:\s]*([^\n\r]{2,30})",
-        ]
-        for p in patterns:
-            match = re.search(p, text)
-            if match:
-                return match.group(1).strip()
+        # 查找"求职意向"等关键词的位置
+        pattern = r"(?:求职意向|期望职位|应聘岗位|目标职位)[：:\s]+"
+        match = re.search(pattern, text)
+        
+        if not match:
+            return None
+        
+        # 找到关键词后的位置
+        start_pos = match.end()
+        remaining_text = text[start_pos:]
+        
+        # 提取到第一个换行符之前的内容
+        line_end = remaining_text.find('\n')
+        if line_end == -1:
+            line_end = remaining_text.find('\r')
+        
+        if line_end > 0:
+            # 有换行符，提取到换行符之前的内容
+            result = remaining_text[:line_end].strip()
+        else:
+            # 没有换行符，提取到文本末尾或遇到明显的分隔符
+            # 查找多个连续空格、制表符、或标点符号作为分隔符
+            separator_match = re.search(r'(\s{2,}|\t+|[,，;；])', remaining_text)
+            if separator_match:
+                result = remaining_text[:separator_match.start()].strip()
+            else:
+                # 没有明显分隔符，限制长度（职位名称通常不会超过30个字符）
+                result = remaining_text[:30].strip()
+        
+        # 清理结果
+        if result:
+            # 移除末尾可能误匹配的内容
+            # 移除末尾的数字+单位（如"3月"、"5年"）
+            result = re.sub(r'\s+\d+\s*[年月岁]+\s*$', '', result)
+            # 移除末尾的单个数字
+            result = re.sub(r'\s+\d+\s*$', '', result)
+            # 移除多余空格
+            result = re.sub(r'\s+', ' ', result).strip()
+            
+            # 验证结果合理性
+            if result:
+                # 职位名称不应该包含某些明显不属于职位名称的关键词
+                invalid_keywords = ['经验', '工作', '年限', '学历', '教育', '背景', '电话', '邮箱', '地址', '姓名']
+                if any(kw in result for kw in invalid_keywords):
+                    # 如果包含这些关键词，尝试只取关键词之前的部分
+                    for kw in invalid_keywords:
+                        if kw in result:
+                            result = result[:result.find(kw)].strip()
+                            break
+                
+                # 最终验证：长度合理且不包含明显错误
+                if 2 <= len(result) <= 50 and not re.match(r'^\d+', result):
+                    return result
+        
         return None
     
     def _extract_experience(self, text):
