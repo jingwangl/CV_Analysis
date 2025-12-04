@@ -6,28 +6,35 @@
 import json
 import base64
 import logging
-from urllib.parse import parse_qs
-
-from resume_parser import ResumeParser
-from info_extractor import InfoExtractor
-from matcher import ResumeMatcher
+import traceback
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 初始化组件
-resume_parser = ResumeParser()
-info_extractor = InfoExtractor()
-resume_matcher = ResumeMatcher()
+# 延迟加载组件，避免模块加载时失败影响 OPTIONS 请求
+resume_parser = None
+info_extractor = None
+resume_matcher = None
 
 # 简单的内存缓存
 cache = {}
 
+def init_components():
+    """延迟初始化组件"""
+    global resume_parser, info_extractor, resume_matcher
+    if resume_parser is None:
+        from resume_parser import ResumeParser
+        from info_extractor import InfoExtractor
+        from matcher import ResumeMatcher
+        resume_parser = ResumeParser()
+        info_extractor = InfoExtractor()
+        resume_matcher = ResumeMatcher()
+
 
 def create_response(status_code, body, origin=None):
     """创建 HTTP 响应"""
-    # 阿里云 FC 会自动处理 CORS，不要在这里重复设置
+    # CORS 完全交给阿里云 HTTP 触发器配置，代码中不设置任何 CORS 头
     headers = {
         "Content-Type": "application/json; charset=utf-8"
     }
@@ -206,26 +213,49 @@ def handler(event, context):
             event = json.loads(event)
         elif isinstance(event, bytes):
             event = json.loads(event.decode("utf-8"))
-        
+    except Exception as e:
+        logger.error(f"解析事件失败: {e}")
+        return {
+            "statusCode": 400,
+            "headers": {
+                "Content-Type": "application/json; charset=utf-8"
+            },
+            "body": json.dumps({"error": "Invalid request"})
+        }
+    
+    # 获取 HTTP 方法和路径
+    http_method = event.get("httpMethod") or event.get("method") or event.get("requestContext", {}).get("http", {}).get("method", "GET")
+    
+    # 先处理 OPTIONS，不依赖任何初始化
+    # CORS 完全交给阿里云 HTTP 触发器配置
+    if http_method == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json; charset=utf-8"
+            },
+            "body": json.dumps({"message": "OK"})
+        }
+    
+    # 其他请求才需要初始化组件
+    try:
         # 获取请求来源
         origin = get_origin(event)
         
-        # 获取 HTTP 方法和路径
-        http_method = event.get("httpMethod", "GET")
-        path = event.get("path", "/")
+        path = (
+            event.get("rawPath") or 
+            event.get("path") or 
+            event.get("requestURI") or 
+            event.get("requestContext", {}).get("http", {}).get("path") or
+            "/"
+        )
+        if "?" in path:
+            path = path.split("?")[0]
         
-        logger.info(f"收到请求: {http_method} {path} from {origin}")
+        logger.info(f"收到请求: {http_method} {path}")
         
-        # 处理 CORS 预检请求
-        if http_method == "OPTIONS":
-            return create_response(200, {"message": "OK"}, origin)
-        
-        # 路由处理
-        if path == "/upload" and http_method == "POST":
-            return handle_upload(event, origin)
-        elif path == "/match" and http_method == "POST":
-            return handle_match(event, origin)
-        elif path == "/health" or path == "/":
+        # 健康检查不需要初始化组件
+        if path == "/health" or path == "/" or path == "":
             return create_response(200, {
                 "success": True,
                 "message": "简历分析 API 服务运行正常",
@@ -235,10 +265,43 @@ def handler(event, context):
                     "POST /match": "简历与岗位匹配评分"
                 }
             }, origin)
+        
+        # 其他路由需要初始化组件
+        try:
+            init_components()
+        except Exception as e:
+            logger.error(f"初始化失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return create_response(500, {"error": f"服务初始化失败: {str(e)}"}, origin)
+        
+        # 路由处理
+        if path == "/upload" and http_method == "POST":
+            return handle_upload(event, origin)
+        elif path == "/match" and http_method == "POST":
+            return handle_match(event, origin)
         else:
-            return create_response(404, {"error": "接口不存在"}, origin)
+            # 返回调试信息帮助排查路由问题
+            return create_response(404, {
+                "error": f"接口不存在: {path}",
+                "debug": {
+                    "received_path": path,
+                    "method": http_method,
+                    "event_keys": list(event.keys()),
+                    "rawPath": event.get("rawPath"),
+                    "path_field": event.get("path")
+                }
+            }, origin)
             
     except Exception as e:
         logger.error(f"处理请求失败: {str(e)}")
-        return create_response(500, {"error": f"服务器内部错误: {str(e)}"})
+        import traceback
+        logger.error(traceback.format_exc())
+        return {
+            "statusCode": 500,
+            "headers": {
+                "Content-Type": "application/json; charset=utf-8"
+            },
+            "body": json.dumps({"error": f"服务器内部错误: {str(e)}"}, ensure_ascii=False)
+        }
 

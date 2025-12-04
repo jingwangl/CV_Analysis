@@ -1,13 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-关键信息提取模块
-使用正则表达式和 AI 模型提取简历中的关键信息
+关键信息提取模块 - 处理分散文本格式
 """
 import re
-import os
-import json
 import logging
-from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,295 +12,202 @@ class InfoExtractor:
     """信息提取器"""
     
     def __init__(self):
-        # 阿里云 DashScope API 配置
-        self.api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-        self.use_ai = bool(self.api_key)
-        
-        # 正则表达式模式
-        self.patterns = {
-            "phone": [
-                r"(?:手机|电话|联系电话|Tel|Phone|Mobile)[：:\s]*([1][3-9]\d{9})",
-                r"([1][3-9]\d{9})",
-                r"(\d{3,4}[-\s]?\d{7,8})"
-            ],
-            "email": [
-                r"(?:邮箱|Email|E-mail|电子邮件)[：:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})",
-                r"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})"
-            ],
-            "name": [
-                r"(?:姓名|Name)[：:\s]*([^\n\r\t,，。、；;]+)",
-                r"^([^\n\r\t,，。、；;\d]{2,4})(?=\s|$)"
-            ],
-            "address": [
-                r"(?:地址|住址|Address|现居|居住地)[：:\s]*([^\n\r]+)",
-                r"((?:北京|上海|广州|深圳|杭州|成都|武汉|南京|西安|重庆|天津|苏州|郑州|长沙|东莞|青岛|沈阳|宁波|昆明)[市]?[^\n\r,，。]{0,30})"
-            ],
-            "education": [
-                r"((?:博士|硕士|本科|大专|高中|学士|MBA|EMBA)[研究生]?)",
-                r"((?:清华|北大|复旦|交大|浙大|中科大|南大|武大|华科|中大|哈工大|西交|同济|北航|北理|天大|南开|川大|山大|吉大|厦大|东南|中南|湖南|重大)[大学]?)"
-            ],
-            "experience_years": [
-                r"(\d+)[年\s]*(?:以上)?(?:工作)?经[验历]",
-                r"(?:工作)?经[验历][：:\s]*(\d+)[年]",
-                r"(\d+)\+?[年\s]*(?:开发|工作|从业)"
-            ],
-            "job_intention": [
-                r"(?:求职意向|期望职位|应聘岗位|目标岗位)[：:\s]*([^\n\r]+)",
-                r"(?:期望|意向)[：:\s]*([^\n\r]+)"
-            ]
-        }
+        pass
     
-    def extract(self, text: str) -> Dict[str, Any]:
-        """
-        从简历文本中提取关键信息
+    def extract(self, text):
+        """从简历文本中提取关键信息"""
+        # 先清理文本，合并分散的字符
+        cleaned_text = self._clean_scattered_text(text)
         
-        Args:
-            text: 简历文本
-            
-        Returns:
-            dict: 提取的关键信息
-        """
         result = {
             "basic_info": {
-                "name": None,
-                "phone": None,
-                "email": None,
-                "address": None
+                "name": self._extract_name(cleaned_text),
+                "phone": self._extract_phone(cleaned_text, text),
+                "email": self._extract_email(cleaned_text, text),
+                "address": self._extract_address(cleaned_text)
             },
             "optional_info": {
-                "job_intention": None,
-                "experience_years": None,
-                "education": None
+                "job_intention": self._extract_job_intention(cleaned_text),
+                "experience_years": self._extract_experience(cleaned_text),
+                "education": self._extract_education(cleaned_text)
             },
-            "skills": [],
+            "skills": self._extract_skills(cleaned_text),
             "extraction_method": "regex"
         }
-        
-        # 使用正则表达式提取基本信息
-        result["basic_info"]["phone"] = self._extract_pattern(text, "phone")
-        result["basic_info"]["email"] = self._extract_pattern(text, "email")
-        result["basic_info"]["name"] = self._extract_name(text)
-        result["basic_info"]["address"] = self._extract_pattern(text, "address")
-        
-        # 提取可选信息
-        result["optional_info"]["job_intention"] = self._extract_pattern(text, "job_intention")
-        result["optional_info"]["experience_years"] = self._extract_experience_years(text)
-        result["optional_info"]["education"] = self._extract_education(text)
-        
-        # 提取技能
-        result["skills"] = self._extract_skills(text)
-        
-        # 如果配置了 AI API，使用 AI 增强提取
-        if self.use_ai:
-            try:
-                ai_result = self._extract_with_ai(text)
-                if ai_result:
-                    result = self._merge_results(result, ai_result)
-                    result["extraction_method"] = "ai_enhanced"
-            except Exception as e:
-                logger.warning(f"AI 提取失败，使用正则结果: {str(e)}")
-        
         return result
     
-    def _extract_pattern(self, text: str, pattern_name: str) -> Optional[str]:
-        """使用正则表达式提取信息"""
-        patterns = self.patterns.get(pattern_name, [])
+    def _clean_scattered_text(self, text):
+        """清理分散的文本，合并字符"""
+        if not text:
+            return ""
         
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+        # 移除单个字母/数字之间的空格
+        # 例如 "P y t h o n" -> "Python"
+        result = []
+        chars = list(text)
+        i = 0
+        
+        while i < len(chars):
+            c = chars[i]
+            result.append(c)
+            
+            # 如果当前是字母/数字，下一个是空格，再下一个也是字母/数字
+            if i + 2 < len(chars):
+                if (c.isalnum() and chars[i+1] == ' ' and 
+                    len(chars[i+2:]) > 0 and chars[i+2].isalnum()):
+                    # 检查是否是单字符模式
+                    if i == 0 or not chars[i-1].isalnum():
+                        # 可能是分散文本，跳过空格
+                        i += 1  # 跳过空格
+            i += 1
+        
+        text = ''.join(result)
+        
+        # 更激进的清理：移除所有单字符之间的空格
+        # 处理类似 "77 3 62 80 72 @ qq .co m" 的情况
+        text = re.sub(r'(\d) (\d)', r'\1\2', text)  # 数字之间
+        text = re.sub(r'(\d) (\d)', r'\1\2', text)  # 再次执行
+        text = re.sub(r'(\w) @ (\w)', r'\1@\2', text)  # @符号
+        text = re.sub(r'@ (\w+) \.', r'@\1.', text)  # 邮箱域名
+        text = re.sub(r'\. co m', '.com', text)
+        text = re.sub(r'\. cn', '.cn', text)
+        text = re.sub(r'qq \.', 'qq.', text)
+        text = re.sub(r'163 \.', '163.', text)
+        text = re.sub(r'gmail \.', 'gmail.', text)
+        
+        return text
+    
+    def _extract_phone(self, cleaned_text, original_text):
+        """提取手机号"""
+        # 先尝试从清理后的文本提取
+        patterns = [
+            r"1[3-9]\d{9}",
+            r"1[3-9]\d[- ]?\d{4}[- ]?\d{4}"
+        ]
+        for p in patterns:
+            match = re.search(p, cleaned_text)
             if match:
-                return match.group(1).strip()
+                return re.sub(r'[- ]', '', match.group())
+        
+        # 尝试从原始文本提取分散的手机号
+        # 匹配类似 "1 8 8 0 0 1 2 8 1 0 6" 或 "18 80 01 28 10 6"
+        scattered = re.search(r'1[3-9][\d\s]{10,20}', original_text)
+        if scattered:
+            digits = re.sub(r'\s', '', scattered.group())
+            if len(digits) == 11 and digits[0] == '1' and digits[1] in '3456789':
+                return digits
         
         return None
     
-    def _extract_name(self, text: str) -> Optional[str]:
-        """提取姓名"""
-        # 首先尝试从明确标记中提取
-        name_patterns = [
-            r"(?:姓\s*名|Name)[：:\s]*([^\n\r\t,，。、；;\d]{2,4})",
-            r"(?:简\s*历|个人简历|Resume)[：:\s]*([^\n\r\t,，。、；;\d]{2,4})"
-        ]
+    def _extract_email(self, cleaned_text, original_text):
+        """提取邮箱"""
+        # 标准格式
+        pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+        match = re.search(pattern, cleaned_text)
+        if match:
+            return match.group()
         
-        for pattern in name_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+        # 尝试从原始文本重建邮箱
+        # 匹配类似 "77 3 62 80 72 @ qq .co m"
+        email_pattern = r'([\d\w][\d\w\s]{2,20})\s*@\s*([\w\s]+)\s*\.\s*(com|cn|net|org)'
+        match = re.search(email_pattern, original_text, re.IGNORECASE)
+        if match:
+            local = re.sub(r'\s', '', match.group(1))
+            domain = re.sub(r'\s', '', match.group(2))
+            suffix = match.group(3)
+            return f"{local}@{domain}.{suffix}"
+        
+        return None
+    
+    def _extract_name(self, text):
+        """提取姓名"""
+        # 常见中文姓氏
+        surnames = "王李张刘陈杨黄赵周吴徐孙马胡朱郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾萧田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石戴贾韦夏邱方侯邹熊孟秦白毛江"
+        
+        # 从标记中提取
+        patterns = [
+            r"(?:姓\s*名|Name)[：:\s]*([^\n\r\t,，。、]{2,4})",
+        ]
+        for p in patterns:
+            match = re.search(p, text, re.IGNORECASE)
             if match:
                 name = match.group(1).strip()
-                if 2 <= len(name) <= 4 and self._is_valid_chinese_name(name):
+                if 2 <= len(name) <= 4:
                     return name
         
-        # 尝试从文本开头提取
-        lines = text.strip().split("\n")[:5]
-        for line in lines:
+        # 在文本开头查找中文名字
+        for line in text.split('\n')[:10]:
             line = line.strip()
-            if 2 <= len(line) <= 4 and self._is_valid_chinese_name(line):
-                return line
+            # 检查是否是 2-4 个中文字符，且第一个是姓氏
+            if 2 <= len(line) <= 4:
+                if line[0] in surnames and all('\u4e00' <= c <= '\u9fff' for c in line):
+                    return line
         
         return None
     
-    def _is_valid_chinese_name(self, name: str) -> bool:
-        """检查是否是有效的中文姓名"""
-        # 常见中文姓氏
-        common_surnames = [
-            "王", "李", "张", "刘", "陈", "杨", "黄", "赵", "周", "吴",
-            "徐", "孙", "马", "胡", "朱", "郭", "何", "高", "林", "罗",
-            "郑", "梁", "谢", "宋", "唐", "许", "韩", "冯", "邓", "曹",
-            "彭", "曾", "萧", "田", "董", "袁", "潘", "于", "蒋", "蔡",
-            "余", "杜", "叶", "程", "苏", "魏", "吕", "丁", "任", "沈",
-            "姚", "卢", "姜", "崔", "钟", "谭", "陆", "汪", "范", "金"
-        ]
-        
-        if not name:
-            return False
-        
-        # 检查第一个字是否是常见姓氏
-        if name[0] in common_surnames:
-            return True
-        
-        # 检查是否全是中文字符
-        return all("\u4e00" <= char <= "\u9fff" for char in name)
+    def _extract_address(self, text):
+        """提取地址"""
+        cities = "北京|上海|广州|深圳|杭州|成都|武汉|南京|西安|重庆|天津|苏州|郑州|长沙|东莞|青岛|沈阳|宁波|昆明|合肥|厦门|无锡|大连|福州|济南|哈尔滨|长春|太原|南昌|南宁|贵阳|海口"
+        pattern = rf"({cities})[市]?[^\n,，。]{{0,30}}"
+        match = re.search(pattern, text)
+        return match.group() if match else None
     
-    def _extract_experience_years(self, text: str) -> Optional[str]:
-        """提取工作年限"""
-        patterns = self.patterns.get("experience_years", [])
-        
-        for pattern in patterns:
-            match = re.search(pattern, text)
+    def _extract_job_intention(self, text):
+        """提取求职意向"""
+        patterns = [
+            r"(?:求职意向|期望职位|应聘岗位|目标职位)[：:\s]*([^\n\r]{2,30})",
+        ]
+        for p in patterns:
+            match = re.search(p, text)
             if match:
-                years = match.group(1)
-                return f"{years}年"
-        
+                return match.group(1).strip()
         return None
     
-    def _extract_education(self, text: str) -> Optional[str]:
-        """提取学历信息"""
-        education_levels = ["博士", "硕士研究生", "硕士", "本科", "学士", "大专", "专科", "高中", "MBA", "EMBA"]
-        
-        for level in education_levels:
-            if level in text:
+    def _extract_experience(self, text):
+        """提取工作年限"""
+        patterns = [
+            r"(\d+)\s*年[以上]*[工作]*经[验历]",
+            r"经[验历][：:\s]*(\d+)\s*年",
+            r"(\d+)\s*[+]*\s*years?",
+        ]
+        for p in patterns:
+            match = re.search(p, text, re.IGNORECASE)
+            if match:
+                return f"{match.group(1)}年"
+        return None
+    
+    def _extract_education(self, text):
+        """提取学历"""
+        levels = ["博士", "硕士", "研究生", "本科", "学士", "大专", "专科", "Master", "Bachelor", "PhD"]
+        text_lower = text.lower()
+        for level in levels:
+            if level.lower() in text_lower:
                 return level
-        
         return None
     
-    def _extract_skills(self, text: str) -> list:
-        """提取技能列表"""
-        # 常见技术技能关键词
+    def _extract_skills(self, text):
+        """提取技能"""
         skill_keywords = [
-            # 编程语言
-            "Python", "Java", "JavaScript", "TypeScript", "C\\+\\+", "C#", "Go", "Rust",
-            "PHP", "Ruby", "Swift", "Kotlin", "Scala", "R语言",
-            # 前端
-            "React", "Vue", "Angular", "HTML", "CSS", "Node.js", "Webpack", "jQuery",
-            # 后端
-            "Spring", "Django", "Flask", "FastAPI", "Express", "Laravel", "Rails",
-            # 数据库
-            "MySQL", "PostgreSQL", "MongoDB", "Redis", "Oracle", "SQL Server", "Elasticsearch",
-            # 云服务和DevOps
-            "AWS", "Azure", "阿里云", "腾讯云", "Docker", "Kubernetes", "K8s", "Jenkins", "Git",
-            # AI/ML
-            "机器学习", "深度学习", "TensorFlow", "PyTorch", "NLP", "计算机视觉", "大模型",
-            # 其他
-            "Linux", "Nginx", "Apache", "RabbitMQ", "Kafka", "微服务", "RESTful", "GraphQL"
+            "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "Go", "Rust", "PHP", "Ruby", "Swift", "Kotlin",
+            "React", "Vue", "Angular", "Node.js", "Node", "Spring", "Django", "Flask", "FastAPI", "Express",
+            "MySQL", "PostgreSQL", "MongoDB", "Redis", "Oracle", "SQL Server", "SQLite",
+            "Docker", "Kubernetes", "K8s", "AWS", "Azure", "GCP", "Linux", "Git", "GitHub",
+            "机器学习", "深度学习", "TensorFlow", "PyTorch", "NLP", "CNN", "RNN", "LSTM",
+            "HTML", "CSS", "REST", "API", "TCP", "UDP", "HTTP", "HTTPS",
+            "Figma", "Photoshop", "AI", "ML", "DL"
         ]
         
-        skills = []
-        text_lower = text.lower()
+        # 清理文本中的空格以便匹配
+        text_cleaned = re.sub(r'(\w) (\w)', r'\1\2', text)
+        text_cleaned = re.sub(r'(\w) (\w)', r'\1\2', text_cleaned)
+        text_lower = text_cleaned.lower()
         
+        found = []
         for skill in skill_keywords:
-            pattern = r"\b" + skill.lower() + r"\b"
-            if re.search(pattern, text_lower, re.IGNORECASE):
-                # 保持原始大小写
-                skills.append(skill.replace("\\+\\+", "++"))
+            # 使用单词边界或直接匹配
+            if re.search(r'\b' + re.escape(skill.lower()) + r'\b', text_lower):
+                found.append(skill)
+            elif skill.lower() in text_lower:
+                found.append(skill)
         
-        return list(set(skills))
-    
-    def _extract_with_ai(self, text: str) -> Optional[Dict[str, Any]]:
-        """使用阿里云 DashScope API 提取信息"""
-        try:
-            import http.client
-            
-            # 构建提示词
-            prompt = f"""请从以下简历文本中提取关键信息，以 JSON 格式返回：
-
-简历文本：
-{text[:3000]}
-
-请提取以下信息并以 JSON 格式返回：
-{{
-    "basic_info": {{
-        "name": "姓名",
-        "phone": "手机号",
-        "email": "邮箱",
-        "address": "地址"
-    }},
-    "optional_info": {{
-        "job_intention": "求职意向",
-        "experience_years": "工作年限",
-        "education": "最高学历"
-    }},
-    "skills": ["技能1", "技能2", ...]
-}}
-
-只返回 JSON，不要其他内容。如果某个字段无法提取，设为 null。"""
-
-            # 调用 DashScope API
-            conn = http.client.HTTPSConnection("dashscope.aliyuncs.com")
-            
-            payload = json.dumps({
-                "model": "qwen-turbo",
-                "input": {
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ]
-                },
-                "parameters": {
-                    "result_format": "message"
-                }
-            })
-            
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            conn.request("POST", "/api/v1/services/aigc/text-generation/generation", payload, headers)
-            response = conn.getresponse()
-            data = json.loads(response.read().decode("utf-8"))
-            
-            if "output" in data and "choices" in data["output"]:
-                content = data["output"]["choices"][0]["message"]["content"]
-                # 提取 JSON 部分
-                json_match = re.search(r"\{[\s\S]*\}", content)
-                if json_match:
-                    return json.loads(json_match.group())
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"AI 提取失败: {str(e)}")
-            return None
-    
-    def _merge_results(self, regex_result: Dict, ai_result: Dict) -> Dict:
-        """合并正则和 AI 提取结果，优先使用 AI 结果"""
-        merged = regex_result.copy()
-        
-        # 合并 basic_info
-        if "basic_info" in ai_result:
-            for key, value in ai_result["basic_info"].items():
-                if value and not merged["basic_info"].get(key):
-                    merged["basic_info"][key] = value
-        
-        # 合并 optional_info
-        if "optional_info" in ai_result:
-            for key, value in ai_result["optional_info"].items():
-                if value and not merged["optional_info"].get(key):
-                    merged["optional_info"][key] = value
-        
-        # 合并 skills
-        if "skills" in ai_result and ai_result["skills"]:
-            existing_skills = set(s.lower() for s in merged["skills"])
-            for skill in ai_result["skills"]:
-                if skill and skill.lower() not in existing_skills:
-                    merged["skills"].append(skill)
-        
-        return merged
-
+        return list(set(found))
