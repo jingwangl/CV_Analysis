@@ -1,6 +1,6 @@
 # CV Analysis - 智能简历分析系统
 
-基于阿里云 Serverless (函数计算 FC) 和 AI 的简历分析 RESTful API 服务。
+基于阿里云 Serverless (函数计算 FC) 的简历分析 RESTful API 服务。
 
 ## 功能特性
 
@@ -18,7 +18,7 @@
 - 岗位需求关键词提取
 - 技能匹配度计算
 - 工作经验相关性分析
-- AI 深度匹配分析（可选）
+- 学历匹配度分析
 
 ### 4. 结果返回
 - JSON 格式结构化输出
@@ -36,7 +36,8 @@ CVAnalysis/
 │       ├── index.py              # API 入口
 │       ├── resume_parser.py      # PDF 解析模块
 │       ├── info_extractor.py     # 信息提取模块
-│       └── matcher.py            # 匹配评分模块
+│       ├── matcher.py            # 匹配评分模块
+│       └── skills.py             # 技能关键词库
 ├── frontend/
 │   ├── index.html                # 前端页面
 │   ├── style.css                 # 样式文件
@@ -67,9 +68,6 @@ s config add
 ```bash
 # 进入后端目录
 cd backend
-
-# (可选) 配置 AI 能力 - 设置阿里云 DashScope API Key
-export DASHSCOPE_API_KEY=your-api-key
 
 # 部署到阿里云函数计算
 s deploy
@@ -250,37 +248,9 @@ Content-Type: application/json
         },
         "recommendations": [
             "建议补充 Docker 相关技能"
-        ],
-        "ai_analysis": {
-            "match_score": 78,
-            "strengths": ["Python 开发经验丰富"],
-            "weaknesses": ["缺少容器化经验"],
-            "suggestions": ["建议学习 Docker 和 K8s"],
-            "summary": "候选人基本符合要求..."
-        }
+        ]
     }
 }
-```
-
-## AI 能力配置 (可选)
-
-系统支持使用阿里云 DashScope (通义千问) 进行 AI 增强分析。
-
-### 获取 API Key
-1. 登录 [阿里云 DashScope 控制台](https://dashscope.console.aliyun.com/)
-2. 开通服务并创建 API Key
-
-### 配置方式
-在部署时设置环境变量：
-```bash
-export DASHSCOPE_API_KEY=sk-xxxxx
-s deploy
-```
-
-或在 `s.yaml` 中配置：
-```yaml
-environmentVariables:
-  DASHSCOPE_API_KEY: ${env.DASHSCOPE_API_KEY}
 ```
 
 ## 本地开发
@@ -328,14 +298,10 @@ A: 确保函数计算的 HTTP 触发器配置了正确的 CORS 头，代码中�
 ### Q: PDF 解析失败？
 A: 确保上传的是有效的 PDF 文件，且文件大小不超过限制。某些扫描版 PDF 可能无法正确提取文字。
 
-### Q: AI 分析未返回结果？
-A: 检查 DASHSCOPE_API_KEY 是否正确配置，以及 API 配额是否充足。
-
 ## 技术栈
 
 - **后端**: Python 3.10, 阿里云函数计算 FC
-- **PDF 解析**: pdfplumber
-- **AI 模型**: 阿里云 DashScope (通义千问)
+- **PDF 解析**: PyMuPDF (fitz)
 - **前端**: 原生 HTML/CSS/JavaScript
 - **部署**: Serverless Devs, GitHub Pages
 
