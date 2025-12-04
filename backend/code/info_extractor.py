@@ -4,6 +4,7 @@
 """
 import re
 import logging
+from skills import get_skill_keywords_titlecase
 
 logger = logging.getLogger(__name__)
 
@@ -186,16 +187,9 @@ class InfoExtractor:
         return None
     
     def _extract_skills(self, text):
-        """提取技能"""
-        skill_keywords = [
-            "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "Go", "Rust", "PHP", "Ruby", "Swift", "Kotlin",
-            "React", "Vue", "Angular", "Node.js", "Node", "Spring", "Django", "Flask", "FastAPI", "Express",
-            "MySQL", "PostgreSQL", "MongoDB", "Redis", "Oracle", "SQL Server", "SQLite",
-            "Docker", "Kubernetes", "K8s", "AWS", "Azure", "GCP", "Linux", "Git", "GitHub",
-            "机器学习", "深度学习", "TensorFlow", "PyTorch", "NLP", "CNN", "RNN", "LSTM",
-            "HTML", "CSS", "REST", "API", "TCP", "UDP", "HTTP", "HTTPS",
-            "Figma", "Photoshop", "AI", "ML", "DL"
-        ]
+        """提取技能（从共享配置导入）"""
+        # 从共享配置获取首字母大写格式的技能列表（用于显示）
+        skill_keywords = get_skill_keywords_titlecase()
         
         # 清理文本中的空格以便匹配
         text_cleaned = re.sub(r'(\w) (\w)', r'\1\2', text)

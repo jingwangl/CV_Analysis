@@ -4,6 +4,7 @@
 """
 import re
 import logging
+from skills import get_skill_keywords_lowercase
 
 logger = logging.getLogger(__name__)
 
@@ -12,32 +13,8 @@ class ResumeMatcher:
     """简历匹配器"""
     
     def __init__(self):
-        # 扩展技能关键词库
-        self.skill_keywords = [
-            # 编程语言（按常见度排序，优先匹配）
-            "java", "python", "go", "c++", "javascript", "typescript", "c#", "rust", "php", "ruby",
-            "swift", "kotlin", "scala", "r语言", "perl", "lua",
-            # 前端框架
-            "react", "vue", "angular", "node.js", "node", "jquery", "bootstrap",
-            # 后端框架
-            "spring", "springboot", "django", "flask", "fastapi", "express", "laravel", "rails",
-            "mybatis", "hibernate", "struts",
-            # 数据库
-            "mysql", "oracle", "postgresql", "mongodb", "redis", "sql server", "sqlite",
-            "elasticsearch", "hbase", "cassandra", "neo4j"
-            # 工具和平台
-            "docker", "kubernetes", "k8s", "aws", "azure", "gcp", "阿里云", "腾讯云",
-            "linux", "git", "jenkins", "ci/cd", "nginx", "apache",
-            # 网络协议和技术
-            "tcp/ip", "tcp", "http", "https", "websocket", "grpc",
-            # 系统和技术概念
-            "多线程", "网络编程", "jvm", "sql优化", "性能优化",
-            # AI/ML
-            "机器学习", "深度学习", "tensorflow", "pytorch", "keras", "scikit-learn",
-            "nlp", "自然语言处理", "计算机视觉", "cnn", "rnn", "lstm", "transformer",
-            # 其他
-            "restful", "graphql", "microservices", "微服务", "分布式", "高并发"
-        ]
+        # 从共享配置导入技能关键词库
+        self.skill_keywords = get_skill_keywords_lowercase()
         
         # 岗位描述关键词（用于判断描述是否有效）
         self.job_keywords = [
