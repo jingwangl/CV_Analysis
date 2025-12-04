@@ -180,10 +180,11 @@ class ResumeMatcher:
                 else:
                     pattern = r'(?:^|[\s、，,；;或|])' + skill_escaped + r'(?:[\s、，,；;或|]|$)'
             elif re.match(r'^[a-zA-Z0-9]+$', skill):
-                # 纯字母数字技能：使用单词边界
-                # 在标准化文本中，单词边界应该能正确匹配
-                # 但为了更可靠，也在标点符号前后匹配
-                pattern = r'(?:^|\b|[\s、，,；;或|])' + skill_escaped + r'(?:\b|[\s、，,；;或|]|$)'
+                # 纯字母数字技能：使用单词边界或中文边界
+                # 在中文文本中，英文单词可能直接跟中文，需要特殊处理
+                # 匹配模式：单词边界 或 中文前/后 或 标点符号前后
+                # 注意：使用非捕获组，避免影响匹配结果
+                pattern = r'(?:^|(?<![a-zA-Z0-9])|[\s、，,；;或|]|[\u4e00-\u9fff])' + skill_escaped + r'(?:(?![a-zA-Z0-9])|[\s、，,；;或|]|[\u4e00-\u9fff]|$)'
             else:
                 # 中文技能或其他：直接匹配
                 pattern = skill_escaped
@@ -237,9 +238,9 @@ class ResumeMatcher:
         if not job_skills:
             return {
                 "score": 50,  # 没有技能要求时给中等分
-                "matched_skills": resume_skills,
+                "matched_skills": [],  # 修复：没有岗位技能要求时，不应该返回简历技能
                 "missing_skills": [],
-                "extra_skills": []
+                "extra_skills": resume_skills  # 所有简历技能都是额外的
             }
         
         # 标准化技能名称：全部转为小写，去除空格，处理等价技能
